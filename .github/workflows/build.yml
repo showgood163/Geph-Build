@@ -67,8 +67,10 @@ jobs:
           - architecture: amd64
             # Using 'musl' enforces statically linked C-libraries (single-file binaries)
             target: x86_64-unknown-linux-musl
+            target_cpu: znver5
           - architecture: arm64
             target: aarch64-unknown-linux-musl
+            target_cpu: cortex-a53
 
     steps:
       - name: Checkout upstream repository
@@ -88,9 +90,11 @@ jobs:
         with:
           tool: cross
 
-      - name: Build geph5-client
+      - name: Build optimized geph5-client
+        env:
+          RUSTFLAGS: "-C target-cpu=${{ matrix.target_cpu }}"
         run: |
-          cross build --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --features "aws_lambda"
+          cross build --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --features "aws_lambda" --config 'profile.release.lto="thin"' --config 'profile.release.strip="symbols"'
 
       - name: Prepare standalone binary
         run: |
