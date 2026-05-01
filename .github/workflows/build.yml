@@ -42,7 +42,7 @@ jobs:
           FORCE_BUILD="${{ github.event.inputs.force_build }}"
           
           # 4. Compare versions
-          if[ "$UPSTREAM_VERSION" != "$LOCAL_VERSION" ] || [ "$FORCE_BUILD" == "true" ]; then
+          if [ "$UPSTREAM_VERSION" != "$LOCAL_VERSION" ] || [ "$FORCE_BUILD" == "true" ]; then
             echo "Version change detected or build forced!"
             
             # 5. Find the exact commit that introduced this version string.
