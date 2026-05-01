@@ -52,7 +52,7 @@ jobs:
             TARGET_COMMIT=$(git log -G "^$VERSION_LINE$" --format=%H -- binaries/geph5-client/Cargo.toml | tail -n 1)
             
             # Fallback if the regex search somehow misses: get the latest commit of that file
-            if[ -z "$TARGET_COMMIT" ]; then
+            if [ -z "$TARGET_COMMIT" ]; then
               TARGET_COMMIT=$(git rev-list -1 HEAD -- binaries/geph5-client/Cargo.toml)
             fi
             
