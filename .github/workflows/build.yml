@@ -62,7 +62,7 @@ jobs:
             
             # Fallback/Error handling if the commit isn't found
             if [ -z "$TARGET_COMMIT" ]; then
-              if[ -n "$TARGET_VERSION" ]; then
+              if [ -n "$TARGET_VERSION" ]; then
                 echo "Error: Could not find a commit introducing version $TARGET_VERSION in Git history."
                 exit 1
               else
