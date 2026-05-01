@@ -1,0 +1,132 @@
+name: Auto-build Upstream geph5-client
+
+on:
+  schedule:
+    - cron: '0 * * * *' # Automatically check for updates every hour
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Specific upstream tag to build (leave empty for latest)'
+        required: false
+        type: string
+
+jobs:
+  check-updates:
+    name: Check for Upstream Updates
+    runs-on: ubuntu-latest
+    outputs:
+      needs_update: ${{ steps.check.outputs.needs_update }}
+      latest_tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - name: Determine if build is needed
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          
+          if [ -n "$INPUT_TAG" ]; then
+            echo "Manual tag provided: $INPUT_TAG"
+            echo "tag=$INPUT_TAG" >> $GITHUB_OUTPUT
+            echo "needs_update=true" >> $GITHUB_OUTPUT
+          else
+            # 1. Fetch tags from the upstream repository
+            TAGS_JSON=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/geph-official/geph5/tags)
+            
+            # 2. Extract the latest tag (geph5 uses tags like 'geph5-client-v0.2.36')
+            UPSTREAM_TAG=$(echo "$TAGS_JSON" | jq -r '.[0].name')
+            
+            # 3. Check what the latest release tag is in YOUR fork/repository
+            LOCAL_TAG=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.tag_name // empty')
+            
+            echo "Upstream tag: $UPSTREAM_TAG"
+            echo "Local tag: $LOCAL_TAG"
+            
+            # 4. Compare tags. If upstream is newer, trigger the build!
+            if [ -n "$UPSTREAM_TAG" ] &&[ "$UPSTREAM_TAG" != "null" ] &&[ "$UPSTREAM_TAG" != "$LOCAL_TAG" ]; then
+              echo "New upstream tag detected!"
+              echo "tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+              echo "needs_update=true" >> $GITHUB_OUTPUT
+            else
+              echo "You are already up to date."
+              echo "tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+              echo "needs_update=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+  build:
+    name: Build ${{ matrix.architecture }}
+    needs: check-updates
+    # Only proceed if a new update was found or if triggered manually
+    if: needs.check-updates.outputs.needs_update == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            # Using 'musl' enforces statically linked C-libraries (single-file binaries)
+            target: x86_64-unknown-linux-musl
+          - architecture: arm64
+            target: aarch64-unknown-linux-musl
+
+    steps:
+      - name: Checkout upstream repository
+        uses: actions/checkout@v4
+        with:
+          # Targets the official repository instead of your own
+          repository: geph-official/geph5
+          ref: ${{ needs.check-updates.outputs.latest_tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build geph5-client
+        run: |
+          cross build --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml
+
+      - name: Prepare standalone binary
+        run: |
+          mkdir -p dist
+          # Rename for clearer OS/Architecture distinction
+          mv target/${{ matrix.target }}/release/geph5-client dist/geph5-client-linux-${{ matrix.architecture }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: geph5-client-linux-${{ matrix.architecture }}
+          path: dist/geph5-client-linux-${{ matrix.architecture }}
+
+  release:
+    name: Create GitHub Release
+    needs: [check-updates, build]
+    if: needs.check-updates.outputs.needs_update == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Essential permission to allow publishing
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check-updates.outputs.latest_tag }}
+          name: Release ${{ needs.check-updates.outputs.latest_tag }}
+          files: |
+            artifacts/geph5-client-linux-amd64/geph5-client-linux-amd64
+            artifacts/geph5-client-linux-arm64/geph5-client-linux-arm64
+          body: |
+            Automatically compiled from upstream `geph-official/geph5`.
+            
+            - **Upstream Tag:** `${{ needs.check-updates.outputs.latest_tag }}`
+            - **Binaries:** Fully statically linked (single portable file) via `musl`.
