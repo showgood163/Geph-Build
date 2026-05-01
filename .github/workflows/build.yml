@@ -90,7 +90,7 @@ jobs:
 
       - name: Build geph5-client
         run: |
-          cross build --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml
+          cross build --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --features "aws_lambda"
 
       - name: Prepare standalone binary
         run: |
