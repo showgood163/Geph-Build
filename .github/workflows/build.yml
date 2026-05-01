@@ -5,6 +5,10 @@ on:
     - cron: '0 * * * *' # Automatically check for updates every hour
   workflow_dispatch:
     inputs:
+      target_version:
+        description: 'Specific version to build (e.g., 0.2.36). Leave empty for latest.'
+        type: string
+        required: false
       force_build:
         description: 'Force a build regardless of version changes'
         type: boolean
@@ -27,33 +31,43 @@ jobs:
           # 1. Clone the upstream repository (partial clone for speed)
           git clone --filter=blob:none https://github.com/geph-official/geph5.git upstream_repo
           cd upstream_repo
-          
-          # 2. Extract the exact line that defines the version in Cargo.toml
-          # grep -m1 ensures we only get the first top-level [package] version
-          VERSION_LINE=$(grep -m1 -E '^version\s*=' binaries/geph5-client/Cargo.toml)
-          UPSTREAM_VERSION=$(echo "$VERSION_LINE" | cut -d '"' -f 2)
-          echo "Upstream version in master: $UPSTREAM_VERSION"
+ 
+          # 2. Determine which version we are targeting
+          TARGET_VERSION="${{ github.event.inputs.target_version }}"
+          FORCE_BUILD="${{ github.event.inputs.force_build }}"
+          if [ -n "$TARGET_VERSION" ]; then
+            echo "Manual target version provided: $TARGET_VERSION"
+            UPSTREAM_VERSION="$TARGET_VERSION"
+            FORCE_BUILD="true" # Always build if user manually requested a specific version
+          else
+            VERSION_LINE=$(grep -m1 -E '^version\s*=' binaries/geph5-client/Cargo.toml)
+            UPSTREAM_VERSION=$(echo "$VERSION_LINE" | cut -d '"' -f 2)
+            echo "Upstream version in master: $UPSTREAM_VERSION"
+          fi
           
           # 3. Get the latest release tag from YOUR local repository
           LOCAL_TAG=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.tag_name // empty')
           LOCAL_VERSION=${LOCAL_TAG#v} # Strips the 'v' prefix if it exists
           echo "Local released version: $LOCAL_VERSION"
           
-          FORCE_BUILD="${{ github.event.inputs.force_build }}"
           
           # 4. Compare versions
           if [ "$UPSTREAM_VERSION" != "$LOCAL_VERSION" ] || [ "$FORCE_BUILD" == "true" ]; then
             echo "Version change detected or build forced!"
-            
+
             # 5. Find the exact commit that introduced this version string.
-            # `git log -G` searches the patch diffs for the version string.
-            # `tail -n 1` ensures we grab the *oldest* commit that made this change 
-            # (i.e., the exact commit where the version was bumped).
-            TARGET_COMMIT=$(git log -G "^$VERSION_LINE$" --format=%H -- binaries/geph5-client/Cargo.toml | tail -n 1)
+            # We use a regex to handle potential formatting differences (e.g. version="0.2.36" vs version = "0.2.36")
+            REGEX="^version[[:space:]]*=[[:space:]]*\"$UPSTREAM_VERSION\""
+            TARGET_COMMIT=$(git log -G "$REGEX" --format=%H -- binaries/geph5-client/Cargo.toml | tail -n 1)            
             
-            # Fallback if the regex search somehow misses: get the latest commit of that file
+            # Fallback/Error handling if the commit isn't found
             if [ -z "$TARGET_COMMIT" ]; then
-              TARGET_COMMIT=$(git rev-list -1 HEAD -- binaries/geph5-client/Cargo.toml)
+              if[ -n "$TARGET_VERSION" ]; then
+                echo "Error: Could not find a commit introducing version $TARGET_VERSION in Git history."
+                exit 1
+              else
+                TARGET_COMMIT=$(git rev-list -1 HEAD -- binaries/geph5-client/Cargo.toml)
+              fi
             fi
             
             echo "Target exact commit: $TARGET_COMMIT"
