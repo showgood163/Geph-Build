@@ -136,13 +136,17 @@ jobs:
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.check-updates.outputs.latest_tag }}
-          name: Release ${{ needs.check-updates.outputs.latest_tag }}
+          # Formats the release tag cleanly based on Cargo.toml (e.g. "v0.2.36")
+          tag_name: v${{ needs.check-updates.outputs.version }}
+          name: Release v${{ needs.check-updates.outputs.version }}
           files: |
             artifacts/geph5-client-linux-amd64/geph5-client-linux-amd64
             artifacts/geph5-client-linux-arm64/geph5-client-linux-arm64
           body: |
             Automatically compiled from upstream `geph-official/geph5`.
             
-            - **Upstream Tag:** `${{ needs.check-updates.outputs.latest_tag }}`
-            - **Binaries:** Fully statically linked (single portable file) via `musl`.
+            - **Upstream Version:** `${{ needs.check-updates.outputs.version }}`
+            - **Exact Build Commit:** `${{ needs.check-updates.outputs.commit }}`
+            - **Binary Details:** Fully statically linked (single portable file) via `musl`.
+            - **Features:** `aws_lambda`
+            - **Optimizations Applied:** `LTO=thin`, `strip=symbols`, CPU-specific targeting.
