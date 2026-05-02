@@ -69,11 +69,11 @@ jobs:
           echo "Local release check for $UPSTREAM_TAG returned HTTP status: $HTTP_STATUS"          
           
           # Evaluate build logic based on existence or force override
-          if[ "$FORCE_BUILD" == "true" ]; then
+          if [ "$FORCE_BUILD" == "true" ]; then
             echo "Build forced!"
             echo "needs_update=true" >> $GITHUB_OUTPUT
             echo "tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
-          elif[ "$HTTP_STATUS" == "404" ]; then
+          elif [ "$HTTP_STATUS" == "404" ]; then
             echo "Tag $UPSTREAM_TAG does not exist locally. Proceeding to build!"
             echo "needs_update=true" >> $GITHUB_OUTPUT
             echo "tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
