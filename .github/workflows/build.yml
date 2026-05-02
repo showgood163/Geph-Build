@@ -62,18 +62,26 @@ jobs:
             fi
             echo "Latest upstream tag: $UPSTREAM_TAG"
           fi
+
+          # Check if this EXACT release tag already exists in YOUR repository
+          # We use curl to extract only the HTTP status code (200 = exists, 404 = not found)
+          HTTP_STATUS=$(curl -sL -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/${{ github.repository }}/releases/tags/$UPSTREAM_TAG")
+          echo "Local release check for $UPSTREAM_TAG returned HTTP status: $HTTP_STATUS"          
           
-          # Check the latest release tag in your local fork
-          LOCAL_TAG=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.tag_name // empty')
-          echo "Local released tag: $LOCAL_TAG"
-          
-          # Compare tags
-          if [ "$UPSTREAM_TAG" != "$LOCAL_TAG" ] || [ "$FORCE_BUILD" == "true" ]; then
-            echo "New tag detected or build forced!"
+          # Evaluate build logic based on existence or force override
+          if[ "$FORCE_BUILD" == "true" ]; then
+            echo "Build forced!"
             echo "needs_update=true" >> $GITHUB_OUTPUT
             echo "tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+          elif[ "$HTTP_STATUS" == "404" ]; then
+            echo "Tag $UPSTREAM_TAG does not exist locally. Proceeding to build!"
+            echo "needs_update=true" >> $GITHUB_OUTPUT
+            echo "tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+          elif [ "$HTTP_STATUS" == "200" ]; then
+            echo "Release $UPSTREAM_TAG already exists in your repo. Skipping build."
+            echo "needs_update=false" >> $GITHUB_OUTPUT
           else
-            echo "You are already up to date."
+            echo "Unexpected API response ($HTTP_STATUS). Assuming no update needed to prevent loops."
             echo "needs_update=false" >> $GITHUB_OUTPUT
           fi
 
