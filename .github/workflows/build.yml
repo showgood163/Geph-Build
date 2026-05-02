@@ -42,13 +42,21 @@ jobs:
             echo "Manual target tag provided: $UPSTREAM_TAG"
             FORCE_BUILD="true"
           else
-            # Fetch up to 100 recent tags from the upstream repository
-            TAGS_JSON=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/geph-official/geph5/tags?per_page=100")
+            # Fix: Use native git command to bypass API pagination limits.
+            # 1. Fetch ALL remote tags.
+            # 2. Extract just the tag names.
+            # 3. Filter for tags starting with 'geph5-client-v'.
+            # 4. Remove dereferenced annotated tags (those ending in ^{}).
+            # 5. Use Version Sort (-V) to properly sort numbers (e.g. 0.2.9 < 0.2.10).
+            # 6. Grab the highest version.
+            UPSTREAM_TAG=$(git ls-remote --tags https://github.com/geph-official/geph5.git \
+              | awk -F/ '{print $3}' \
+              | grep '^geph5-client-v' \
+              | grep -v '\^{}' \
+              | sort -V \
+              | tail -n 1)
             
-            # Extract the latest tag that starts specifically with 'geph5-client-'
-            UPSTREAM_TAG=$(echo "$TAGS_JSON" | jq -r '[.[] | select(.name | startswith("geph5-client-"))][0].name')
-            
-            if [ "$UPSTREAM_TAG" == "null" ] || [ -z "$UPSTREAM_TAG" ]; then
+            if[ -z "$UPSTREAM_TAG" ]; then
               echo "Error: Could not find any upstream tags starting with 'geph5-client-'."
               exit 1
             fi
