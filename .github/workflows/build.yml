@@ -68,7 +68,7 @@ jobs:
           echo "Local released tag: $LOCAL_TAG"
           
           # Compare tags
-          if[ "$UPSTREAM_TAG" != "$LOCAL_TAG" ] || [ "$FORCE_BUILD" == "true" ]; then
+          if [ "$UPSTREAM_TAG" != "$LOCAL_TAG" ] || [ "$FORCE_BUILD" == "true" ]; then
             echo "New tag detected or build forced!"
             echo "needs_update=true" >> $GITHUB_OUTPUT
             echo "tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
