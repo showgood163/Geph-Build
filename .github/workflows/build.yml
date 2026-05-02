@@ -157,4 +157,4 @@ jobs:
             - **Upstream Tag Built:** `${{ needs.check-updates.outputs.tag }}`
             - **Binary Details:** Fully statically linked (single portable file) via `musl`.
             - **Features:** `aws_lambda`
-            - **Optimizations Applied:** `LTO=fat`, `codegen-units=1`, `strip=symbols`, CPU-specific targeting.
+            - **Optimizations Applied:** `LTO=fat`, `strip=symbols`, CPU-specific targeting.
