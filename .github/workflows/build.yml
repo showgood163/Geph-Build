@@ -56,7 +56,7 @@ jobs:
               | sort -V \
               | tail -n 1)
             
-            if[ -z "$UPSTREAM_TAG" ]; then
+            if [ -z "$UPSTREAM_TAG" ]; then
               echo "Error: Could not find any upstream tags starting with 'geph5-client-'."
               exit 1
             fi
