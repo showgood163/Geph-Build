@@ -16,65 +16,54 @@ on:
 
 jobs:
   check-updates:
-    name: Check Cargo.toml Version
+    name: Check Upstream Tags
     runs-on: ubuntu-latest
     outputs:
       needs_update: ${{ steps.check.outputs.needs_update }}
-      version: ${{ steps.check.outputs.version }}
-      commit: ${{ steps.check.outputs.commit }}
+      tag: ${{ steps.check.outputs.tag }}
     steps:
-      - name: Detect exact commit of version change
+      - name: Detect upstream tag
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 1. Clone the upstream repository (partial clone for speed)
-          git clone --filter=blob:none https://github.com/geph-official/geph5.git upstream_repo
-          cd upstream_repo
- 
-          # 2. Determine which version we are targeting
           TARGET_VERSION="${{ github.event.inputs.target_version }}"
           FORCE_BUILD="${{ github.event.inputs.force_build }}"
+          
           if [ -n "$TARGET_VERSION" ]; then
-            echo "Manual target version provided: $TARGET_VERSION"
-            UPSTREAM_VERSION="$TARGET_VERSION"
-            FORCE_BUILD="true" # Always build if user manually requested a specific version
+            # Format the target version properly to match upstream tags
+            if [[ "$TARGET_VERSION" == geph5-client-* ]]; then
+              UPSTREAM_TAG="$TARGET_VERSION"
+            elif [[ "$TARGET_VERSION" == v* ]]; then
+              UPSTREAM_TAG="geph5-client-$TARGET_VERSION"
+            else
+              UPSTREAM_TAG="geph5-client-v$TARGET_VERSION"
+            fi
+            echo "Manual target tag provided: $UPSTREAM_TAG"
+            FORCE_BUILD="true"
           else
-            VERSION_LINE=$(grep -m1 -E '^version\s*=' binaries/geph5-client/Cargo.toml)
-            UPSTREAM_VERSION=$(echo "$VERSION_LINE" | cut -d '"' -f 2)
-            echo "Upstream version in master: $UPSTREAM_VERSION"
+            # Fetch up to 100 recent tags from the upstream repository
+            TAGS_JSON=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/geph-official/geph5/tags?per_page=100")
+            
+            # Extract the latest tag that starts specifically with 'geph5-client-'
+            UPSTREAM_TAG=$(echo "$TAGS_JSON" | jq -r '[.[] | select(.name | startswith("geph5-client-"))][0].name')
+            
+            if [ "$UPSTREAM_TAG" == "null" ] || [ -z "$UPSTREAM_TAG" ]; then
+              echo "Error: Could not find any upstream tags starting with 'geph5-client-'."
+              exit 1
+            fi
+            echo "Latest upstream tag: $UPSTREAM_TAG"
           fi
           
-          # 3. Get the latest release tag from YOUR local repository
-          LOCAL_TAG=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.tag_name // empty')
-          LOCAL_VERSION=${LOCAL_TAG#v} # Strips the 'v' prefix if it exists
-          echo "Local released version: $LOCAL_VERSION"
+          # Check the latest release tag in your local fork
+          LOCAL_TAG=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.tag_name // empty')
+          echo "Local released tag: $LOCAL_TAG"
           
-          
-          # 4. Compare versions
-          if [ "$UPSTREAM_VERSION" != "$LOCAL_VERSION" ] || [ "$FORCE_BUILD" == "true" ]; then
-            echo "Version change detected or build forced!"
-
-            # 5. Find the exact commit that introduced this version string.
-            # We use a regex to handle potential formatting differences (e.g. version="0.2.36" vs version = "0.2.36")
-            REGEX="^version[[:space:]]*=[[:space:]]*\"$UPSTREAM_VERSION\""
-            TARGET_COMMIT=$(git log -G "$REGEX" --format=%H -- binaries/geph5-client/Cargo.toml | tail -n 1)            
-            
-            # Fallback/Error handling if the commit isn't found
-            if [ -z "$TARGET_COMMIT" ]; then
-              if [ -n "$TARGET_VERSION" ]; then
-                echo "Error: Could not find a commit introducing version $TARGET_VERSION in Git history."
-                exit 1
-              else
-                TARGET_COMMIT=$(git rev-list -1 HEAD -- binaries/geph5-client/Cargo.toml)
-              fi
-            fi
-            
-            echo "Target exact commit: $TARGET_COMMIT"
-            
+          # Compare tags
+          if[ "$UPSTREAM_TAG" != "$LOCAL_TAG" ] || [ "$FORCE_BUILD" == "true" ]; then
+            echo "New tag detected or build forced!"
             echo "needs_update=true" >> $GITHUB_OUTPUT
-            echo "commit=$TARGET_COMMIT" >> $GITHUB_OUTPUT
-            echo "version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
+            echo "tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
           else
             echo "You are already up to date."
             echo "needs_update=false" >> $GITHUB_OUTPUT
@@ -103,8 +92,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: geph-official/geph5
-          # We checkout the specific commit hash we found in the check step
-          ref: ${{ needs.check-updates.outputs.commit }}
+          ref: ${{ needs.check-updates.outputs.tag }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -120,7 +108,7 @@ jobs:
         env:
           RUSTFLAGS: "-C target-cpu=${{ matrix.target_cpu }}"
         run: |
-          cross build --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --features "aws_lambda" --config 'profile.release.lto="thin"' --config 'profile.release.strip="symbols"'
+          cross build --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --features "aws_lambda" --config 'profile.release.lto="fat"' --config 'profile.release.strip="symbols"'
 
       - name: Prepare standalone binary
         run: |
@@ -150,17 +138,15 @@ jobs:
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
-          # Formats the release tag cleanly based on Cargo.toml (e.g. "v0.2.36")
-          tag_name: v${{ needs.check-updates.outputs.version }}
-          name: Release v${{ needs.check-updates.outputs.version }}
+          tag_name: ${{ needs.check-updates.outputs.tag }}
+          name: Release ${{ needs.check-updates.outputs.tag }}
           files: |
             artifacts/geph5-client-linux-amd64/geph5-client-linux-amd64
             artifacts/geph5-client-linux-arm64/geph5-client-linux-arm64
           body: |
             Automatically compiled from upstream `geph-official/geph5`.
             
-            - **Upstream Version:** `${{ needs.check-updates.outputs.version }}`
-            - **Exact Build Commit:** `${{ needs.check-updates.outputs.commit }}`
+            - **Upstream Tag Built:** `${{ needs.check-updates.outputs.tag }}`
             - **Binary Details:** Fully statically linked (single portable file) via `musl`.
             - **Features:** `aws_lambda`
-            - **Optimizations Applied:** `LTO=thin`, `strip=symbols`, CPU-specific targeting.
+            - **Optimizations Applied:** `LTO=fat`, `codegen-units=1`, `strip=symbols`, CPU-specific targeting.
